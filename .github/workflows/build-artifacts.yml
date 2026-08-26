@@ -87,13 +87,15 @@ jobs:
         if: matrix.os == 'windows-2022'
         run: node scripts/generate-latest-yml.mjs dist
 
-      # Collapse to the 8 public asset names so the publish job's upload is
-      # deterministic and matches the release gate vocabulary.
+      # Collapse to the 8 public asset names (release-shape.mjs) so the publish
+      # job's upload is deterministic and matches the release gate vocabulary.
+      # Note: only the Windows `.exe.blockmap` is part of the contract — the
+      # macOS `.dmg.blockmap` must be dropped (it would be an "unexpected" file).
       - name: Collect assets
         shell: bash
         run: |
           mkdir -p artifacts
-          cp -f dist/*.dmg dist/*.sh* dist/*.exe dist/*.blockmap dist/latest.yml dist/*.deb artifacts/ 2>/dev/null || true
+          cp -f dist/*.dmg dist/*.sha256 dist/*.exe dist/*.exe.blockmap dist/latest.yml dist/*.deb artifacts/ 2>/dev/null || true
           ls -la artifacts
 
       - uses: actions/upload-artifact@v7
