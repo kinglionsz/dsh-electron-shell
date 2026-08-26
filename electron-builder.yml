@@ -55,6 +55,8 @@ publish:
 
 mac:
   category: public.app-category.developer-tools
+  # macOS requires >= 512x512; build/icon.png is rendered at 1024x1024.
+  icon: build/icon.png
   # No Apple Developer certificate is required for this ad-hoc build. It is
   # intentionally not notarized and still needs a first-launch confirmation.
   identity: "-"
