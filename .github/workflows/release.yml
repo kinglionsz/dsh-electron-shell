@@ -170,6 +170,9 @@ jobs:
         run: node scripts/smoke-installed.mjs nsis dist
       - name: Write installer SHA-256
         run: node scripts/write-release-checksum.mjs dist
+- name: Generate Windows latest.yml (electron-updater metadata)
+  if: matrix.os == 'windows-2022'
+  run: node scripts/generate-latest-yml.mjs dist
       - name: Attest macOS installer (build provenance)
         if: matrix.os == 'macos-14'
         uses: actions/attest@v4
