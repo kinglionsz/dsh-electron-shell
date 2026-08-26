@@ -1,0 +1,139 @@
+name: Build Artifacts
+
+# Lightweight three-platform artifact builder for forks that want the dmg /
+# deb (and Windows exe) without the full verify → attestation → publish gate
+# in release.yml. Bump the tag on a pushed commit to run it; the publish job
+# creates/updates the GitHub Release and uploads the 8 asset files.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: mac
+            # dmg on macOS: electronDist is the local platform electron.
+            targets: --mac dmg
+          - os: windows-2022
+            name: win
+            targets: --win nsis
+          - os: ubuntu-24.04
+            name: linux
+            targets: --linux deb
+    runs-on: ${{ matrix.os }}
+    env:
+      # build.mjs stages the mobile-shell Web artifact from here; keep it out
+      # of the asar (extraResources) and the harness package.
+      DSH_MOBILE_SHELL_WEB_ROOT: ${{ github.workspace }}/dsh-mobile-shell/dist/web
+    steps:
+      - uses: actions/checkout@v7
+
+      # The shell consumes the other repo's Web artifact (immutable tag v1.0.0).
+      - uses: actions/checkout@v7
+        with:
+          repository: citrusli2026/dsh-mobile-shell
+          ref: v1.0.0
+          path: dsh-mobile-shell
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.8.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Produce the mobile-shell Web artifact that build.mjs expects.
+      - name: Package mobile-shell Web artifact
+        run: npm --prefix dsh-mobile-shell run package:web
+
+      # Materialize the harness closure plus the pinned Node runtime.
+      - name: Bootstrap harness and Node runtime
+        run: pnpm run bootstrap
+
+      # Run the esbuild bundle first, then electron-builder for the matrix
+      # target. `--publish never` keeps electron-builder from creating the
+      # release itself; the publish job below owns that.
+      - name: Package (${{ matrix.targets }})
+        run: pnpm run build && pnpm exec electron-builder ${{ matrix.targets }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # latest.yml / blockmap are Windows electron-updater metadata; a Linux
+      # build would emit a colliding same-named manifest, so drop it there.
+      - name: Drop Linux updater metadata
+        if: matrix.os == 'ubuntu-24.04'
+        run: rm -f dist/latest.yml
+
+      # Write the portable sha256sum for this platform's installer.
+      - name: Write installer SHA-256
+        run: node scripts/write-release-checksum.mjs dist
+
+      # Windows-only: emit the electron-updater latest.yml from the real exe.
+      - name: Generate Windows latest.yml (electron-updater metadata)
+        if: matrix.os == 'windows-2022'
+        run: node scripts/generate-latest-yml.mjs dist
+
+      # Collapse to the 8 public asset names so the publish job's upload is
+      # deterministic and matches the release gate vocabulary.
+      - name: Collect assets
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp -f dist/*.dmg dist/*.sh* dist/*.exe dist/*.blockmap dist/latest.yml dist/*.deb artifacts/ 2>/dev/null || true
+          ls -la artifacts
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dsh-electron-shell-${{ matrix.name }}
+          path: artifacts/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.ref_type == 'tag' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # check-release-assets.mjs imports the `yaml` package; a tag trigger does
+      # not run pnpm install, so install just that runtime dependency.
+      - name: Install release validator dependency
+        run: npm install --no-save --no-package-lock --ignore-scripts --omit=dev
+
+      - name: Validate release assets
+        run: node scripts/check-release-assets.mjs artifacts "${{ github.ref_name }}"
+
+      - name: Create / update GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          REPO="${{ github.repository }}"
+          gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 || \
+            gh release create "$TAG" --prerelease --repo "$REPO" \
+              --title "dsh-desktop ${{ github.ref_name }}" \
+              --notes "Installer assets for dsh-desktop ${{ github.ref_name }}."
+          for A in $(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name'); do
+            gh release delete-asset "$TAG" "$A" -y --repo "$REPO"
+          done
+          gh release upload "$TAG" artifacts/* --clobber --repo "$REPO"
+          gh release edit "$TAG" --prerelease --draft=false --repo "$REPO"
