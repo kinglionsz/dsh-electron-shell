@@ -170,9 +170,9 @@ jobs:
         run: node scripts/smoke-installed.mjs nsis dist
       - name: Write installer SHA-256
         run: node scripts/write-release-checksum.mjs dist
-- name: Generate Windows latest.yml (electron-updater metadata)
-  if: matrix.os == 'windows-2022'
-  run: node scripts/generate-latest-yml.mjs dist
+      - name: Generate Windows latest.yml (electron-updater metadata)
+        if: matrix.os == 'windows-2022'
+        run: node scripts/generate-latest-yml.mjs dist
       - name: Attest macOS installer (build provenance)
         if: matrix.os == 'macos-14'
         uses: actions/attest@v4
@@ -265,7 +265,7 @@ jobs:
 
           **验证安装包来源（可选但推荐）**
           ```sh
-          gh attestation verify <下载的安装包> -R citrusli2026/dsh-electron-shell
+          gh attestation verify <下载的安装包> -R ${{ github.repository }}
           shasum -a 256 -c <安装包>.sha256
           ```
           安装包由公开 CI（GitHub Actions）构建，来源证明可随时验证。
