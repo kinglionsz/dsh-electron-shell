@@ -42,11 +42,15 @@ extraResources:
 asar: true
 npmRebuild: false
 
+# Store (no-compress) NSIS payload to avoid 7-Zip running out of memory when
+# archiving the ~570 MiB bundled harness on RAM-limited build machines.
+compression: store
+
 # Windows electron-updater reads latest.yml and the NSIS blockmap from the
 # GitHub release. macOS remains check-only because the build is unsigned.
 publish:
   provider: github
-  owner: citrusli2026
+  owner: kinglionsz
   repo: dsh-electron-shell
 
 mac:
