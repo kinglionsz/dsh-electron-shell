@@ -1,0 +1,85 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install pnpm
+        run: npm install -g pnpm@10.33.2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Run tests
+        run: pnpm run test
+
+      - name: Deploy harness
+        run: pnpm run deploy-harness
+
+      - name: Fetch Node runtime
+        run: pnpm run fetch-node
+
+      - name: Rebuild native modules
+        run: pnpm run rebuild-harness-native
+
+      - name: Build Electron app
+        run: pnpm run build
+
+      - name: Package for ${{ matrix.os }}
+        run: pnpm run dist:dir
+        if: matrix.os == 'windows-latest' || matrix.os == 'macos-latest'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-electron-shell-${{ matrix.os }}
+          path: dist/
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/**/*
+          generate_release_notes: true
